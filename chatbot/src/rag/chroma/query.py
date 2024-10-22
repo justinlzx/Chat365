@@ -1,5 +1,5 @@
-from create_database import initialize_embeddings
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from .database import initialize_embeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 import numpy as np
 
 

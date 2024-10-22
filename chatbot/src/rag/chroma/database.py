@@ -1,6 +1,6 @@
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import RecursiveUrlLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
 from typing import Any, List, Dict

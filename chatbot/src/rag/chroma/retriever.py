@@ -1,22 +1,20 @@
-from query import embed_query
 from langchain_chroma import Chroma
 
-from create_database import process_documents, initialize_embeddings
+from .database import process_documents, initialize_embeddings
 
 
-def similarity_search(db: Chroma, query: str, embedding_function) -> list:
-    # embedded_query = embed_query(query, embedding_function)
-
+def similarity_search(db: Chroma, query: str) -> list:
     results = db.similarity_search(query, k=3)
 
     return results
 
 
 if __name__ == "__main__":
-    db, documents = process_documents()
+    db, _ = process_documents()
 
     embedding_function = initialize_embeddings()
 
     query = "What is the best way to do a rag model?"
     results = similarity_search(db, query, embedding_function)
+
     print(results)
