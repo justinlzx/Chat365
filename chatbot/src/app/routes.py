@@ -1,50 +1,83 @@
-import sys
-from fastapi import APIRouter
-from ..rag.chroma.database import process_documents
-from ..rag.chroma.retriever import similarity_search
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_chroma import Chroma
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import JSONResponse
+from langchain_openai import ChatOpenAI  # Changed from OpenAI to ChatOpenAI
+from dotenv import load_dotenv
 import os
+from typing import List
+from ..rag.chroma.database import process_documents, get_db
+from ..rag.chroma.retriever import similarity_search
 
 router = APIRouter()
 
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+
+# class QueryResponse:
+#     def __init__(self, response: str, sources: List[str]):
+#         self.response = response
+#         self.sources = sources
+
 
 @router.post("/query")
-def query(db, query: str):
-    docs = similarity_search(db, query=query)
+async def query(query: str, db=Depends(get_db)):
+    try:
+        # Get relevant documents
+        docs = similarity_search(db, query=query)
 
-    system_prompt = SystemMessage(
-        content="""
-        You are a helpful health assistant whose job is to assist the user with answering queries relating to their health. Here are some relevant documents about healthcare that you can use to help the user.
-        
-        If a question does not make any sense or is not factually coherent, 
-        explain why instead of answering something incorrectly. If you don't 
-        know the answer to a question, don't share false information.
-        \n\n
-        """,
-    )
+        # Create system and user prompts
+        system_prompt = """You are a helpful health assistant whose job is to assist the user with answering queries relating to their health. Here are some relevant documents about healthcare that you can use to help the user.
 
-    user_prompt = HumanMessage(
-        content="""The user asked:
-        \n\n
-        {input}
-        \n\n
-        Consider the following documents to help answer the user's question:
-        \n\n
-        """
-    )
+If a question does not make any sense or is not factually coherent, explain why instead of answering something incorrectly. If you don't know the answer to a question, don't share false information."""
 
-    rag_prompt = "".join([doc.page_content for doc in docs])
+        # Format documents for context
+        document_context = "\n\n".join([doc.page_content for doc in docs])
 
-    final_prompt = system_prompt + user_prompt + rag_prompt
+        user_prompt = f"""The user asked:
 
-    final_prompt.format_messages(input=query)
+{query}
 
-    print(final_prompt)
+Consider the following documents to help answer the user's question:
+
+{document_context}"""
+
+        # Initialize ChatOpenAI
+        model = ChatOpenAI(
+            model="gpt-4o-mini",
+            temperature=0.5,
+            api_key=OPENAI_API_KEY,
+        )
+
+        # Create messages for chat completion
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
+        print(f"Messages: {messages}")
+
+        # Generate response
+        result = model.invoke(messages)
+
+        # Extract sources for attribution
+        sources = [doc.metadata.get("source", "Unknown source") for doc in docs]
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "message": "Response generated successfully",
+                "response": result.content,
+                "sources": sources,
+            },
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"An error occurred: {str(e)}")
 
 
 if __name__ == "__main__":
     db, documents = process_documents()
-    user_query = "What is the best way to do a rag model?"
-    result = query(db, user_query)
+    user_query = "What is the best way to do a RAG model?"
+    result = query(user_query, db)
     print(result)

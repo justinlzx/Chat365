@@ -1,116 +1,141 @@
-from langchain_chroma import Chroma
 from langchain_community.document_loaders import RecursiveUrlLoader
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
-from typing import Any, List, Dict
+from typing import Any, AsyncGenerator, Dict, List
+from asyncio import to_thread
 import os
 import shutil
+import asyncio
+import chromadb
+from chromadb.config import Settings
 
-# DATA_PATHS = "https://www.healthhub.sg/programmes/nsc"  # add more sites as required
-DATA_PATHS = "https://medium.com/@callumjmac/implementing-rag-in-langchain-with-chroma-a-step-by-step-guide-16fc21815339"
+DATA_PATHS = "https://aws.amazon.com/blogs/opensource/deploy-large-language-models-easily-with-the-new-ezsmdeploy-python-sdk/"
+PERSIST_DIRECTORY = "./embeddings"
+
+
+def ensure_directory_permissions():
+    """Ensure the persistence directory exists and has proper permissions"""
+    if os.path.exists(PERSIST_DIRECTORY):
+        # Remove existing directory to ensure clean state
+        shutil.rmtree(PERSIST_DIRECTORY)
+
+    # Create directory with explicit permissions
+    os.makedirs(PERSIST_DIRECTORY, mode=0o777, exist_ok=True)
+
+    # Ensure the directory and its parent have proper permissions
+    try:
+        os.chmod(PERSIST_DIRECTORY, 0o777)
+        parent_dir = os.path.dirname(PERSIST_DIRECTORY)
+        if parent_dir:
+            os.chmod(parent_dir, 0o777)
+    except Exception as e:
+        print(f"Warning: Could not set permissions: {e}")
 
 
 def initialize_embeddings() -> HuggingFaceEmbeddings:
-    """
-    Initialize HuggingFace embeddings with proper configuration
-    """
+    """Initialize HuggingFace embeddings with proper configuration"""
     return HuggingFaceEmbeddings()
 
 
-def initialize_vector_store(embedding_function: HuggingFaceEmbeddings) -> Chroma:
-    """
-    Initialize Chroma vector store with the specified embedding function
-    """
+def initialize_vector_store() -> Chroma:
+    """Initialize Chroma vector store with the specified embedding function"""
+    ensure_directory_permissions()
 
-    # Delete the directory if it exists
-    if os.path.exists("./embeddings"):
-        shutil.rmtree("./embeddings")
+    # Initialize ChromaDB with explicit settings
+    chroma_client = chromadb.PersistentClient(
+        path=PERSIST_DIRECTORY,
+        settings=Settings(
+            allow_reset=True, is_persistent=True, anonymized_telemetry=False
+        ),
+    )
 
-    # Ensure the directory is re-created
-    os.makedirs("./embeddings", exist_ok=True)
-
+    # Initialize the vector store with the client
     return Chroma(
+        client=chroma_client,
         collection_name="example_collection",
-        embedding_function=embedding_function,
-        persist_directory="./embeddings",
+        embedding_function=initialize_embeddings(),
+        persist_directory=PERSIST_DIRECTORY,
     )
 
 
-def load_documents(data_path):
-    """
-    Load HTML documents from the specified directory
-    """
-    # if not os.path.exists(DATA_PATH):
-    #     raise FileNotFoundError(f"Directory not found: {DATA_PATH}")
-
-    document_loader = RecursiveUrlLoader(data_path)
-    return document_loader.load()
+async def load_documents(data_path: str) -> List[Any]:
+    """Load HTML documents from the specified URL asynchronously"""
+    document_loader = RecursiveUrlLoader(url=data_path)
+    return await to_thread(document_loader.load)
 
 
-def split_documents(docs):
-    """
-    Split documents into chunks
-    """
+def split_documents(docs: List[Any]) -> List[Any]:
+    """Split documents into chunks"""
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-
     return text_splitter.split_documents(docs)
 
 
-def process_documents():
-    """
-    Main function to process documents and create embeddings
-    """
+def clean_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Clean metadata to ensure all values are of acceptable types"""
+    cleaned = {}
+    for key, value in metadata.items():
+        if value is None:
+            cleaned[key] = ""
+        elif isinstance(value, (int, float, bool, str)):
+            cleaned[key] = value
+        else:
+            cleaned[key] = str(value)
+    return cleaned
+
+
+async def process_documents(vector_store: Chroma) -> Chroma:
+    """Process documents and create embeddings"""
     try:
-        # Initialize embedding function
-        embedding_function = initialize_embeddings()
+        # Load documents asynchronously
+        documents = await load_documents(DATA_PATHS)
 
-        # Initialize vector store
-        vector_store = initialize_vector_store(embedding_function)
+        # Process documents in thread pool
+        splits = await to_thread(split_documents, documents)
+        cleaned_splits = await to_thread(
+            filter_complex_metadata, splits, allowed_types=(str, int, float, bool)
+        )
 
-        # Load and process documents
-        documents = load_documents(DATA_PATHS)
-        splits = split_documents(documents)
+        # Add documents to vector store in thread pool to avoid blocking
+        await to_thread(vector_store.add_documents, cleaned_splits)
 
-        cleaned_splits = filter_complex_metadata(splits, allowed_types=(str, int, float, bool))
+        # Persist the changes
+        vector_store.persist()
 
-        # Add documents to vector store
-        vector_store.add_documents(cleaned_splits)
-
-        # # Persist the vector store
-        # vector_store.persist()
-
-        return vector_store, documents
+        return vector_store
 
     except Exception as e:
         print(f"Error processing documents: {str(e)}")
         raise
 
 
-def clean_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Clean metadata to ensure all values are of acceptable types
-    """
-    cleaned = {}
-    for key, value in metadata.items():
-        # Convert None to empty string
-        if value is None:
-            cleaned[key] = ""
-        # Convert numbers to appropriate types
-        elif isinstance(value, (int, float, bool, str)):
-            cleaned[key] = value
-        # Convert everything else to string
-        else:
-            cleaned[key] = str(value)
-    return cleaned
+async def get_db() -> AsyncGenerator[Chroma, None]:
+    """Database dependency injection"""
+    try:
+        vector_store = initialize_vector_store()
+        processed_store = await process_documents(vector_store)
+        yield processed_store
+    except Exception as e:
+        raise RuntimeError(f"Database error: {str(e)}")
+    finally:
+        # Ensure proper cleanup
+        if "vector_store" in locals():
+            vector_store.persist()
 
 
 if __name__ == "__main__":
-    vector_store, documents = process_documents()
 
-    # Print first document for inspection
-    if documents:
-        print("First document content:")
-        print(documents[0].page_content)
-        print("\nMetadata:")
-        print(documents[0].metadata)
+    async def main():
+        """Async main function to run the document processing"""
+        try:
+            db = initialize_vector_store()
+            result = await process_documents(db)
+            print("Documents processed successfully")
+            print("Database initialized successfully")
+            return result
+        except Exception as e:
+            print(f"Error processing documents: {str(e)}")
+            return None
+
+    asyncio.run(main())
