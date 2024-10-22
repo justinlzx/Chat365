@@ -15,6 +15,6 @@ if __name__ == "__main__":
     # Initialize embedding function
 
     # Embed query
-    query = "What is the best way to lose weight?"
+    query = "What is the best way to do a rag model?"
     query_embedding = embed_query(query, embed_query)
     print(query_embedding)

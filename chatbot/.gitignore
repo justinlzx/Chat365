@@ -1,2 +1,8 @@
 venv
 .env
+
+#ignore embeddings 
+src/rag_app/chroma/embeddings
+
+
+*/__pycache__
