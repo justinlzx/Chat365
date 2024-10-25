@@ -25,8 +25,10 @@ def mount_gradio_interface(app: FastAPI, path: str = "/"):
         fn=query,
         title="Health Companion",
         examples=[
-            "What are common symptoms of the flu?",
-            "How can I maintain a healthy diet?",
+            "How do I use the Healthub app to upload my medical records?",
+            "How do I know if I am eligible for a free HPB steps tracker?",
+            "How do I read the nutritional labels on Singapore food packaging?",
+            "Tell me more about the new Healthier Choice nutritional food labels",
         ],
         retry_btn=None,
         undo_btn=None,
