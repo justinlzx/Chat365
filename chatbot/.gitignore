@@ -3,7 +3,9 @@ venv
 
 #ignore embeddings 
 **/embeddings/*
-src/rag/chroma/chroma
+src/rag/chroma
+
+**/.DS_Store
 
 
 **/__pycache__

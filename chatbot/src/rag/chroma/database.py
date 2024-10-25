@@ -1,7 +1,8 @@
+from pathlib import Path
 import traceback
-from langchain_community.document_loaders import RecursiveUrlLoader
-from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_chroma import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
 from langchain_core.documents import Document
@@ -11,11 +12,13 @@ import shutil
 import asyncio
 import chromadb
 from chromadb.config import Settings
+from src.utils.logger import logger
 
-DATA_PATHS = [
-    "https://aws.amazon.com/blogs/opensource/deploy-large-language-models-easily-with-the-new-ezsmdeploy-python-sdk/"
-]
-PERSIST_DIRECTORY = "./embeddings"
+# DATA_PATHS = [
+#     "https://aws.amazon.com/blogs/opensource/deploy-large-language-models-easily-with-the-new-ezsmdeploy-python-sdk/"
+# ]
+DATA_PATHS = "./src/rag/data"
+PERSIST_DIRECTORY = "./src/rag/chroma/embeddings"
 
 
 def ensure_directory_permissions():
@@ -57,18 +60,51 @@ def initialize_vector_store() -> Chroma:
     # Initialize the vector store with the client
     return Chroma(
         client=chroma_client,
-        collection_name="example_collection",
+        collection_name="health_information",
         embedding_function=initialize_embeddings(),
         persist_directory=PERSIST_DIRECTORY,
     )
 
 
-def load_documents(paths: List[str]) -> List[Document]:
-    """Synchronously load documents from paths"""
+def load_documents(path: str) -> List[Document]:
+    """Synchronously load documents from paths with enhanced error checking"""
     documents = []
-    for path in paths:
-        loader = RecursiveUrlLoader(url=path)
-        documents.extend(loader.load())
+    folder = Path(path)
+
+    # Debug: Check if directory exists
+    if not folder.exists():
+        logger.error(f"Directory does not exist: {folder.absolute()}")
+        raise FileNotFoundError(f"Directory not found: {folder.absolute()}")
+
+    # Debug: List all files in directory
+    all_files = list(folder.glob("*"))
+    logger.info(f"All files in directory: {all_files}")
+
+    # Debug: Check specifically for PDFs
+    pdf_files = list(folder.glob("*.pdf"))
+    logger.info(f"PDF files found: {pdf_files}")
+
+    if not pdf_files:
+        logger.warning(f"No PDF files found in {folder.absolute()}")
+        return documents
+
+    for file_path in pdf_files:
+        try:
+            logger.info(f"Attempting to load: {file_path}")
+            loader = PyPDFLoader(
+                str(file_path),
+                extract_images=True,
+            )
+            loaded_docs = loader.load_and_split()
+            documents.extend(loaded_docs)
+            logger.info(
+                f"Successfully loaded {len(loaded_docs)} pages from {file_path}"
+            )
+        except Exception as e:
+            logger.error(f"Error loading {file_path}: {str(e)}")
+            raise
+
+    logger.info(f"Total documents loaded: {len(documents)}")
     return documents
 
 
@@ -103,6 +139,7 @@ def process_documents(vector_store: Chroma) -> Chroma:
             splits, allowed_types=(str, int, float, bool)
         )
 
+        print(f"Loaded {len(documents)} documents and split into {len(splits)} chunks")
         # Add documents to vector store
         vector_store.add_documents(cleaned_splits)
 
@@ -134,7 +171,6 @@ def get_db() -> Chroma:
 
         # Print collection stats for debugging
         collection_count = vector_store._collection.count()
-        print(f"Collection count: {collection_count}")
 
         # If empty, process documents
         if collection_count == 0:
