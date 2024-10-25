@@ -1,17 +1,20 @@
+import traceback
 from langchain_community.document_loaders import RecursiveUrlLoader
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
-from typing import Any, AsyncGenerator, Dict, List
-from asyncio import to_thread
+from langchain_core.documents import Document
+from typing import Any, Dict, List
 import os
 import shutil
 import asyncio
 import chromadb
 from chromadb.config import Settings
 
-DATA_PATHS = "https://aws.amazon.com/blogs/opensource/deploy-large-language-models-easily-with-the-new-ezsmdeploy-python-sdk/"
+DATA_PATHS = [
+    "https://aws.amazon.com/blogs/opensource/deploy-large-language-models-easily-with-the-new-ezsmdeploy-python-sdk/"
+]
 PERSIST_DIRECTORY = "./embeddings"
 
 
@@ -60,10 +63,13 @@ def initialize_vector_store() -> Chroma:
     )
 
 
-async def load_documents(data_path: str) -> List[Any]:
-    """Load HTML documents from the specified URL asynchronously"""
-    document_loader = RecursiveUrlLoader(url=data_path)
-    return await to_thread(document_loader.load)
+def load_documents(paths: List[str]) -> List[Document]:
+    """Synchronously load documents from paths"""
+    documents = []
+    for path in paths:
+        loader = RecursiveUrlLoader(url=path)
+        documents.extend(loader.load())
+    return documents
 
 
 def split_documents(docs: List[Any]) -> List[Any]:
@@ -85,23 +91,20 @@ def clean_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return cleaned
 
 
-async def process_documents(vector_store: Chroma) -> Chroma:
+def process_documents(vector_store: Chroma) -> Chroma:
     """Process documents and create embeddings"""
     try:
-        # Load documents asynchronously
-        documents = await load_documents(DATA_PATHS)
+        # Load documents synchronously
+        documents = load_documents(DATA_PATHS)  # Assuming this has a sync version
 
-        # Process documents in thread pool
-        splits = await to_thread(split_documents, documents)
-        cleaned_splits = await to_thread(
-            filter_complex_metadata, splits, allowed_types=(str, int, float, bool)
+        # Process documents directly
+        splits = split_documents(documents)
+        cleaned_splits = filter_complex_metadata(
+            splits, allowed_types=(str, int, float, bool)
         )
 
-        # Add documents to vector store in thread pool to avoid blocking
-        await to_thread(vector_store.add_documents, cleaned_splits)
-
-        # Persist the changes
-        vector_store.persist()
+        # Add documents to vector store
+        vector_store.add_documents(cleaned_splits)
 
         return vector_store
 
@@ -110,18 +113,41 @@ async def process_documents(vector_store: Chroma) -> Chroma:
         raise
 
 
-async def get_db() -> AsyncGenerator[Chroma, None]:
-    """Database dependency injection"""
+def get_db() -> Chroma:
+    """Get or create the vector database"""
     try:
-        vector_store = initialize_vector_store()
-        processed_store = await process_documents(vector_store)
-        yield processed_store
+        # Ensure persist directory exists
+        if not os.path.exists(PERSIST_DIRECTORY):
+            os.makedirs(PERSIST_DIRECTORY)
+            print(f"Created persist directory at {PERSIST_DIRECTORY}")
+
+        # Initialize embeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-mpnet-base-v2"
+        )
+
+        # Create or load vector store
+        vector_store = Chroma(
+            persist_directory=PERSIST_DIRECTORY,
+            embedding_function=embeddings,
+        )
+
+        # Print collection stats for debugging
+        collection_count = vector_store._collection.count()
+        print(f"Collection count: {collection_count}")
+
+        # If empty, process documents
+        if collection_count == 0:
+            print("Vector store is empty, processing documents...")
+            process_documents(vector_store)
+            print("Documents processed and added to vector store")
+
+        return vector_store
+
     except Exception as e:
+        print(f"Detailed error in get_db: {str(e)}")
+        traceback.print_exc()  # Print the full traceback
         raise RuntimeError(f"Database error: {str(e)}")
-    finally:
-        # Ensure proper cleanup
-        if "vector_store" in locals():
-            vector_store.persist()
 
 
 if __name__ == "__main__":
