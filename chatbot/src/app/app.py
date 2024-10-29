@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
         # Initialize vector store
         logger.info("Initializing vector store...")
         _vector_store = initialize_vector_store()
-        _vector_store = get_db()
+        # _vector_store = get_db()
 
         num_items = _vector_store._collection.count()
         # Process documents if needed

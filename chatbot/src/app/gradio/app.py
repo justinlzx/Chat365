@@ -1,4 +1,3 @@
-import asyncio
 from typing import List
 from fastapi import FastAPI
 import gradio as gr
@@ -21,9 +20,10 @@ def query(message: str, history: List[List[str]] = None) -> str:
 
 
 def mount_gradio_interface(app: FastAPI, path: str = "/"):
+
     interface = gr.ChatInterface(
         fn=query,
-        title="Health Companion",
+        title="💬 Chat365",
         examples=[
             "How do I use the Healthub app to upload my medical records?",
             "How do I know if I am eligible for a free HPB steps tracker?",
