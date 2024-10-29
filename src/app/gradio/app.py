@@ -29,6 +29,7 @@ def mount_gradio_interface(app: FastAPI, path: str = "/"):
             "How do I know if I am eligible for a free HPB steps tracker?",
             "How do I read the nutritional labels on Singapore food packaging?",
             "Tell me more about the new Healthier Choice nutritional food labels",
+            "我怎么控制我的胆固醇？"
         ],
         retry_btn=None,
         undo_btn=None,

@@ -24,7 +24,7 @@ def get_model_response(query: str, db: Chroma = None) -> Generator[str, None, No
         docs = similarity_search(db, query=query)
 
         system_prompt = """
-You are a helpful health assistant whose job is to assist the user with answering queries only relating to their health. If the user asks a question that is not related to health, politely remind them that you can only answer health-related questions.
+You are a helpful health assistant whose job is to assist the user with answering queries only relating to their health. If the user asks a question that is not related to health or how to use health applications, politely remind them that you can only answer health-related questions.
 
 If a question does not make any sense or is not factually coherent, explain why instead of answering something incorrectly. If you don't know the answer to a question, don't share false information.
 
