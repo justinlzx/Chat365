@@ -2,7 +2,7 @@
 
 Chat365 is a real-time Retrieval Augmented Generation (RAG) chat application to support the digital transformation of Healthy365 — Healthiest365.
 
-It is built using FastAPI, a modern, fast (high-performance), web framework for building APIs with Python, and integrates with OpenAI's GPT-4 for text generation capabilities.
+It is built using FastAPI, a modern, fast (high-performance), web framework for building APIs with Python, and integrates with OpenAI's GPT-4 for multilingual text generation capabilities.
 
 RAG is implemented with Chroma as the vector store and LangChain for prompt chaining.
 
